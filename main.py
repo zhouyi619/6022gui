@@ -12,6 +12,9 @@ class Data(object):
         self.sample_rate = int(sample_rate)
         self.data_ch1 = []
         self.data_ch2 = []
+        self.ch1_total_Q = 0
+        self.ch2_total_Q = 0
+        self.sampling_resistor = 100
 
     def add(self, ch1, ch2):
         if len(self.data_ch1) + len(ch1) > self.point:
@@ -19,6 +22,8 @@ class Data(object):
             del self.data_ch2[0 : int(len(self.data_ch2) + len(ch2) - self.point)]
         self.data_ch1 += ch1
         self.data_ch2 += ch2
+        self.ch1_total_Q += sum(map(lambda x: abs(x)  / self.sampling_resistor, ch1)) / len(ch1) * (1 / self.sample_rate * len(ch1))
+        self.ch2_total_Q += sum(map(lambda x: abs(x) / self.sampling_resistor, ch2)) / len(ch2) * (1 / self.sample_rate * len(ch2))
 
     def get(self):
         return self.data_ch1, self.data_ch2
@@ -40,6 +45,19 @@ class Data(object):
         self.point = self.point / self.sample_rate * sample_rate
         self.sample_rate = sample_rate
         print(f"data: set sample rate to {sample_rate}, point to {self.point}")
+
+    def get_total_Q(self):
+        return self.ch1_total_Q, self.ch2_total_Q
+    
+    def reset_total_Q(self):
+        self.ch1_total_Q = 0
+        self.ch2_total_Q = 0
+        print(f"data: reset total Q")
+
+    def set_sampling_resistor(self, sampling_resistor):
+        self.sampling_resistor = sampling_resistor
+        print(f"data: set sampling resistor to {sampling_resistor}")
+        self.reset_total_Q()
 
 
 def dataThread(control_queue, data_queue, sample_rate=20):
@@ -271,6 +289,11 @@ def guiThread(control_queue, data_queue):
             min_scale=dpg.get_value("ch2_plot_min"),
         )
 
+    def set_sampling_resistor():
+        global data
+        data.sampling_resistor = dpg.get_value("Sampling_resistor")
+        print("guiThread: set sampling resistor to ", data.sampling_resistor)
+
     global trigger_method, trigger_static_value_signal
     trigger_method = "rising"
     trigger_static_value_signal = False
@@ -284,17 +307,23 @@ def guiThread(control_queue, data_queue):
             case "静态值":
                 trigger_method = "static_value"
         if trigger_method == "rising":
+            dpg.configure_item("trigger_raising_group", show=True)
+            dpg.configure_item("trigger_static_value_group", show=False)
+            """
             dpg.configure_item("trigger_point", enabled=True)
             dpg.configure_item("trigger_ch", enabled=True)
             dpg.configure_item("trigger_static_value", enabled=False)
             dpg.configure_item("trigger_static_value_ch", enabled=False)
-            dpg.configure_item("trigger_static_value_signal", enabled=False)
+            dpg.configure_item("trigger_static_value_signal", enabled=False) """
         elif trigger_method == "static_value":
+            dpg.configure_item("trigger_static_value_group", show=True)
+            dpg.configure_item("trigger_raising_group", show=False)
+            """
             dpg.configure_item("trigger_point", enabled=False)
             dpg.configure_item("trigger_ch", enabled=False)
             dpg.configure_item("trigger_static_value", enabled=True)
             dpg.configure_item("trigger_static_value_ch", enabled=True)
-            dpg.configure_item("trigger_static_value_signal", enabled=True)
+            dpg.configure_item("trigger_static_value_signal", enabled=True)"""
             trigger_static_value_signal = False
         print("guiThread: set trigger method to ", trigger_method)
 
@@ -343,45 +372,46 @@ def guiThread(control_queue, data_queue):
                 callback=set_trigger_method,
                 width=200,
             )
-        with dpg.group(horizontal=True, tag="trigger_static_value_group"):
-            dpg.add_text("配置静态值触发:")
-            dpg.add_input_float(
-                label="静态值触发值",
-                default_value=1,
-                tag="trigger_static_value",
-                callback=set_trigger_static_value_point,
-                width=200,
+        
+        with dpg.collapsing_header(label="配置静态值触发" , tag="trigger_static_value_group"):
+            with dpg.group(horizontal=True):
+                dpg.add_input_float(
+                    label="静态值触发值",
+                    default_value=1,
+                    tag="trigger_static_value",
+                    callback=set_trigger_static_value_point,
+                    width=200,
+                )
+                dpg.add_combo(
+                    label="触发通道",
+                    items=["ch1", "ch2"],
+                    default_value="ch1",
+                    tag="trigger_static_value_ch",
+                    callback=set_trigger_static_value_ch,
+                    width=150,
+                )
+                dpg.add_button(
+                    label="重置触发",
+                    callback=reset_trigger_static_value_signal,
+                    tag="trigger_static_value_signal",
             )
-            dpg.add_combo(
-                label="触发通道",
-                items=["ch1", "ch2"],
-                default_value="ch1",
-                tag="trigger_static_value_ch",
-                callback=set_trigger_static_value_ch,
-                width=150,
-            )
-            dpg.add_button(
-                label="重置触发",
-                callback=reset_trigger_static_value_signal,
-                tag="trigger_static_value_signal",
-            )
-        with dpg.group(horizontal=True, tag="trigger_raising_group"):
-            dpg.add_text("配置上升沿触发:")
-            dpg.add_input_float(
-                label="触发点",
-                default_value=1,
-                tag="trigger_point",
-                callback=set_trigger_raising_point,
-                width=200,
-            )
-            dpg.add_combo(
-                label="触发通道",
-                items=["ch1", "ch2"],
-                default_value="ch1",
-                tag="trigger_ch",
-                callback=set_trigger_raising_ch,
-                width=150,
-            )
+        with dpg.collapsing_header(label="配置上升沿触发" , tag="trigger_raising_group"):
+            with dpg.group(horizontal=True):
+                dpg.add_input_float(
+                    label="触发点",
+                    default_value=1,
+                    tag="trigger_point",
+                    callback=set_trigger_raising_point,
+                    width=200,
+                )
+                dpg.add_combo(
+                    label="触发通道",
+                    items=["ch1", "ch2"],
+                    default_value="ch1",
+                    tag="trigger_ch",
+                    callback=set_trigger_raising_ch,
+                    width=150,
+                )
 
         with dpg.group(horizontal=True):
             dpg.add_text("ch1: ", tag="ch1_current")
@@ -396,6 +426,13 @@ def guiThread(control_queue, data_queue):
             dpg.add_text("ch2_Vmax: ", tag="ch2_Vmax")
             dpg.add_text("ch2_Vavg: ", tag="ch2_Vavg")
             dpg.add_text("ch2_Vrms: ", tag="ch2_Vrms")
+
+        with dpg.collapsing_header(label="统计Q" , tag="total_Q_group"):
+            with dpg.group(horizontal=True):
+                dpg.add_input_float(label="采样电阻大小", default_value=100, tag="Sampling_resistor",callback=set_sampling_resistor, width=200)
+                dpg.add_text("ch1_total_Q: ", tag="ch1_total_Q")
+                dpg.add_text("ch2_total_Q: ", tag="ch2_total_Q")
+                dpg.add_button(label="重置", callback=data.reset_total_Q)
 
         with dpg.plot(label="plot_ch1", height=400, width=800, tag="plot_ch1_"):
             dpg.add_plot_legend()
@@ -449,6 +486,10 @@ def guiThread(control_queue, data_queue):
                 dpg.set_value("ch2_Vmax", f"ch2_Vmax: {round_plus(ch2_Vmax,3)}")
                 dpg.set_value("ch2_Vavg", f"ch2_Vavg: {round_plus(ch2_Vavg,3)}")
                 dpg.set_value("ch2_Vrms", f"ch2_Vrms: {round_plus(ch2_Vrms,3)}")
+                if not trigger_static_value_signal:
+                    ch1_total_Q, ch2_total_Q = data.get_total_Q()
+                    dpg.set_value("ch1_total_Q", f"ch1_total_Q: {round_plus(ch1_total_Q,5)}")
+                    dpg.set_value("ch2_total_Q", f"ch2_total_Q: {round_plus(ch2_total_Q,5)}")
             if enabel_trigger:
                 if trigger_method == "rising":
                     if trigger_ch == "ch1":
